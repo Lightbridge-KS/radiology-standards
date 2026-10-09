@@ -1,0 +1,180 @@
+# DICOM SR (Structured Reporting)
+
+**DICOM SR** is a family of DICOM objects that store **structured clinical content** (findings, measurements, coded observations, and references to images) instead of pixel data. It was introduced in **Supplement 23 (2000)**. An SR is a normal DICOM Part 10 file with the same Patient, Study, and Series modules as an image, but with `Modality = SR`. It is stored in PACS and queried and retrieved like any other instance.
+
+The key idea is that the report is a **tree of coded name–value pairs**, not free text. A machine can then read "long axis = 12.3 mm, finding = nodule, on image X at coordinates (x,y)" without any NLP.
+
+```
+  Ordinary DICOM image            DICOM SR
+  ┌─────────────────────┐       ┌─────────────────────────────┐
+  │ Patient / Study /   │       │ Patient / Study /           │
+  │ Series modules      │       │ Series modules (Modality=SR)│
+  ├─────────────────────┤       ├─────────────────────────────┤
+  │ Image Pixel module  │       │ SR Document General         │
+  │ (7FE0,0010) pixels  │       │ SR Document Content         │
+  └─────────────────────┘       │   └─ Content Tree (nested   │
+                                │      ContentSequence)       │
+                                └─────────────────────────────┘
+```
+
+## The building block: the Content Item
+
+Each node in the tree is a **Content Item** with three parts:
+
+```
+  Content Item
+  ├── Value Type        what kind of value?      (0040,A040)  e.g. NUM
+  ├── Concept Name      what is this? (a code)   (0040,A043)  e.g. "Long axis"
+  ├── Value             the actual value                      e.g. 12.3 mm
+  └── Relationship Type how it links to parent   (0040,A010)  e.g. CONTAINS
+```
+
+The concept name is never a free string. It is a **code triplet**:
+
+```
+  (CodeValue, CodingSchemeDesignator, CodeMeaning)
+  ("126000",  "DCM",                  "Imaging Measurement Report")
+```
+
+Common coding schemes are DCM (DICOM's own codes), SCT (SNOMED CT), LN (LOINC), and UCUM (units, such as `mm` and `mm2`).
+
+### Value Types
+
+| Value Type | Holds | Example |
+|---|---|---|
+| CONTAINER | Groups child items (like a heading) | "Findings" |
+| TEXT | Free text | "Mild atelectasis" |
+| CODE | A coded value | Finding = "Nodule" (SNOMED) |
+| NUM | Number + UCUM unit | 12.3 mm |
+| DATE / TIME / DATETIME | Temporal values | Study date |
+| PNAME | Person name | Observer name |
+| UIDREF | A UID | Tracking unique ID |
+| IMAGE / COMPOSITE / WAVEFORM | Reference to another DICOM instance | Source CT slice |
+| SCOORD | 2D graphic on an image (POINT, POLYLINE, ELLIPSE…) | ROI outline |
+| SCOORD3D | 3D coordinates in patient space (mm) | 3D point / polygon |
+| TCOORD | Temporal coordinates | Segment of an ECG |
+
+### Relationship Types
+
+| Relationship | Meaning |
+|---|---|
+| CONTAINS | Parent container includes child |
+| HAS PROPERTIES | Child describes the parent (e.g. a finding's site) |
+| HAS OBS CONTEXT | Who, what, or where observed (observer, subject) |
+| HAS ACQ CONTEXT | Acquisition conditions |
+| HAS CONCEPT MOD | Modifies the meaning of the concept name |
+| INFERRED FROM | Evidence: "this value was derived from X" |
+| SELECTED FROM | Coordinates were drawn on this image |
+
+## Example: an AI lung-nodule measurement (TID 1500 style)
+
+```
+CONTAINER: Imaging Measurement Report (126000, DCM)              ← root
+├─ HAS CONCEPT MOD  CODE: Language of Content = English
+├─ HAS OBS CONTEXT  CODE: Observer Type = Device
+├─ HAS OBS CONTEXT  TEXT: Device Observer Name = "RAMAAI-LungNet v1.2"
+├─ HAS CONCEPT MOD  CODE: Procedure Reported = CT chest
+├─ CONTAINS  CONTAINER: Image Library
+│   └─ CONTAINS  IMAGE → CT instance UID 1.2.840...123
+└─ CONTAINS  CONTAINER: Imaging Measurements
+    └─ CONTAINS  CONTAINER: Measurement Group
+        ├─ TEXT:    Tracking Identifier = "Nodule 1"
+        ├─ UIDREF:  Tracking Unique Identifier = 2.25.1234...
+        ├─ CODE:    Finding = Nodule (SNOMED)
+        ├─ CODE:    Finding Site = Right upper lobe (SNOMED)
+        ├─ NUM:     Long axis = 12.3 mm
+        │   └─ INFERRED FROM  SCOORD: POLYLINE (x1,y1,x2,y2)
+        │        └─ SELECTED FROM  IMAGE → CT instance UID 1.2.840...123
+        └─ CODE:    Composition = Solid
+```
+
+This shows why SR is useful. Every number is tied to what it is (a code), where it is (a site code), how it was obtained (SCOORD), and which pixel data it came from (IMAGE reference).
+
+## SOP Classes: different levels of expressiveness
+
+```
+  Basic Text SR ──► Enhanced SR ──► Comprehensive SR ──► Comprehensive 3D SR
+  (TEXT, CODE,      (+ NUM,          (+ by-reference       (+ SCOORD3D)
+   IMAGE refs;       SCOORD,          relationships:
+   strict tree)      TCOORD)          a DAG, not just
+                                      a tree)
+```
+
+There are also purpose-specific SR SOP classes:
+
+- **Key Object Selection (KOS)**, `Modality = KO`, flags "key images" in a study.
+- **X-Ray Radiation Dose SR (RDSR)** is emitted by CT and X-ray scanners. Its CT template is TID 10011, with CTDIvol, DLP, and so on. Dose-monitoring software reads this.
+- **Mammography CAD SR** and **Chest CAD SR** hold older CAD outputs.
+- Ultrasound measurement SRs (OB and echo templates) are sent from US machines to reporting systems so measurements auto-populate.
+
+## Templates (TID) and Context Groups (CID)
+
+An SR SOP class only defines the grammar. **Templates** in DICOM Part 16 define the content: which items must appear, in what order, with which codes. **Context Groups (CIDs)** list the allowed codes for a slot.
+
+```
+  SOP Class   = grammar      ("you may use NUM, CODE, SCOORD...")
+  Template    = schema       ("a Measurement Group must contain a
+  (TID)                        Tracking Identifier, then a Finding...")
+  Context     = enum         ("Finding Site must be a code from CID xxx")
+  Group (CID)
+```
+
+Templates relevant to radiology AI:
+
+- **TID 1500 Measurement Report** is the de facto standard for quantitative imaging and AI results, used with TID 1410 (planar ROI), TID 1411 (volumetric ROI), and TID 1501 (qualitative evaluations).
+- **TID 2000 Basic Diagnostic Imaging Report** is a general radiology report structure.
+- **TID 10011 CT Radiation Dose** is the dose template.
+
+## Where SR fits among AI output objects
+
+AI models often produce several DICOM objects together:
+
+```
+             ┌────────────────────────┐
+             │   Source CT series     │
+             └──────────┬─────────────┘
+                        │ referenced by
+      ┌─────────────────┼─────────────────────┐
+      ▼                 ▼                     ▼
+  DICOM SEG         DICOM SR (TID 1500)     GSPS / annotations
+  (mask pixels:     (semantics: finding,    (how to display:
+   "which voxels")   measurements, codes,    overlays, W/L,
+                     refs to SEG segments)   text on screen)
+```
+
+The **IHE AI Results (AIR)** profile formalizes this SEG + SR combination for delivering AI results to PACS and viewers.
+
+## Practical tooling (Python / CLI)
+
+- **pydicom** reads and writes SR as nested sequences, but it is low-level.
+- **highdicom** (Python) offers high-level classes for TID 1500 (`Comprehensive3DSR`, `MeasurementReport`, `PlanarROIMeasurementsAndQualitativeEvaluations`). It is the most practical choice for AI pipelines.
+- **dcmtk** provides `dsrdump` to print the tree and `dsr2html` to render it.
+- **dcmqi** converts JSON to and from TID 1500 SR and SEG.
+- The **OHIF Viewer** can display TID 1500 measurements.
+
+Here's a minimal pydicom tree walker to inspect any SR file:
+
+```python
+import pydicom
+
+def walk(item, depth=0):
+    name = item.ConceptNameCodeSequence[0].CodeMeaning if "ConceptNameCodeSequence" in item else "-"
+    rel, vt = item.get("RelationshipType", "ROOT"), item.ValueType
+    value = {
+        "TEXT": lambda: item.TextValue,
+        "CODE": lambda: item.ConceptCodeSequence[0].CodeMeaning,
+        "NUM":  lambda: (f"{item.MeasuredValueSequence[0].NumericValue} "
+                         f"{item.MeasuredValueSequence[0].MeasurementUnitsCodeSequence[0].CodeValue}"),
+    }.get(vt, lambda: "")()
+    print(f"{'  ' * depth}[{rel}] {vt}: {name} {('= ' + str(value)) if value else ''}")
+    for child in item.get("ContentSequence", []):
+        walk(child, depth + 1)
+
+walk(pydicom.dcmread("report_sr.dcm"))   # the dataset itself is the root CONTAINER
+```
+
+## Caveats in practice
+
+- **Viewer and PACS support is uneven.** Many PACS display SR as a flat text dump or not at all. Check your PACS vendor's TID 1500 support before relying on it to show AI results.
+- **Getting the codes right takes effort.** Choosing correct SNOMED, DCM, and UCUM codes is most of the work, and invalid codes silently reduce interoperability. Validators like `dciodvfy` (dicom3tools) help.
+- **SR is not a replacement for the narrative report** in most RIS workflows. It is better seen as machine-readable evidence alongside the narrative.

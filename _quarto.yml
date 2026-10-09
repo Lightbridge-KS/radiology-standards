@@ -9,6 +9,10 @@ book:
   site-url: https://radiology-standards-lightbridge.netlify.app
   chapters:
     - index.qmd
+    - part: DICOM
+      chapters: 
+        - text: DICOM SR
+          href: "contents/DICOM/dicom-sr.qmd"
 
 format:
   html:
