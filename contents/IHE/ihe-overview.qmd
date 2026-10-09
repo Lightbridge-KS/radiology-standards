@@ -1,0 +1,78 @@
+---
+title: "IHE - Overview"
+---
+
+
+IHE (Integrating the Healthcare Enterprise) is **not a standards developer in the usual sense**. Its job is to take existing standards like DICOM, HL7 v2, and FHIR and specify exactly *how* to use them together so that products from different vendors interoperate for a specific clinical workflow. RSNA and HIMSS founded it in 1998, and a large part of its motivation came from radiology. DICOM alone was too flexible: two "DICOM-compliant" systems could still fail to work together.
+
+### Where IHE sits
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  CLINICAL PROBLEM / USE CASE                                 │
+│  "How do we record & share assessments of AI results?"       │
+└───────────────────────────────┬──────────────────────────────┘
+                                │  IHE's scope
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│  IHE INTEGRATION PROFILE  (e.g., AIRA)                       │
+│   • Actors        → functional roles (who does what)         │
+│   • Transactions  → message exchanges between actors         │
+│   • Content       → exact structure of the payload           │
+│   • Options       → defined variations (e.g., RESTful)       │
+└───────────────────────────────┬──────────────────────────────┘
+                                │  constrains / profiles
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│  BASE STANDARDS  (NOT written by IHE)                        │
+│   DICOM (SR, KOS, SEG, DIMSE, DICOMweb) · HL7 v2 · FHIR · …  │
+└───────────────────────────────┬──────────────────────────────┘
+                                │  implemented in
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│  PRODUCTS  (PACS, viewer, AI platform, RIS …)                │
+│   → tested at Connectathons, declared in Integration Stmts   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### What IHE covers
+
+IHE defines **interfaces and workflows between systems**. The core building blocks are:
+
+- **Actors**: abstract functional roles, not products. A single PACS product might implement both the Image Manager/Image Archive and the Image Display actors.
+- **Transactions**: numbered message exchanges, such as Store Instances [RAD-50] or Rejection Note Stored [RAD-66]. Each one pins down which standard, which options, and which required attributes are used.
+- **Content modules**: the precise structure of the data being exchanged, such as an SR template.
+
+The work is organized by **domain**: Radiology, IT Infrastructure (ITI), Cardiology, Pathology & Laboratory Medicine, Patient Care Coordination, Eye Care, Radiation Oncology, and others. Each domain publishes a **Technical Framework** split into volumes:
+
+```
+Vol 1 (TF-1) – Profiles      : use cases, actors, options, groupings
+Vol 2 (TF-2) – Transactions  : message-level detail
+Vol 3 (TF-3) – Content       : data encoding (templates, codes)
+Vol 4 (TF-4) – National Extensions
+```
+
+Your AIRA document follows this layout: Section 57 is Vol 1, sections 4.x are Vol 2, and section 6.8 is Vol 3.
+
+IHE's scope also includes the **testing and adoption process**. Profiles move from Public Comment to **Trial Implementation** (where AIRA Rev 1.1 is now) to Final Text. Vendors test their products against each other at **Connectathons** and publish **IHE Integration Statements** declaring which actors and profiles they support. Hospitals can then cite those profiles in procurement requirements.
+
+### What IHE deliberately does *not* cover
+
+| Out of scope | Why it matters |
+|---|---|
+| Inventing new base standards | IHE profiles DICOM/HL7/FHIR. If something is missing, it asks DICOM or HL7 to add it. |
+| Internal product design, UI, algorithms | Only the "wire" between systems is specified. |
+| Clinical decision criteria and operational processes | IHE says *how to record and exchange* information, not *how to make clinical judgments*. |
+| Formal product certification (by default) | A Connectathon pass is testing evidence, not a regulatory approval. |
+
+### AIRA as a concrete example
+
+AIRA shows these boundaries clearly:
+
+- **It reuses rather than invents.** It adds no new actors and no new transactions. It combines existing ones (Quality Note Creator, Image Manager/Archive, RAD-50, RAD-66, RAD-137, and so on) with a new SR content template (TID IHE_RADAIRA1).
+- **It defines the record, not the judgment.** It explicitly does *not* define assessment criteria or the operational processes for ensuring rating quality. It only standardizes how an accept, modify, or reject decision is encoded and communicated.
+- **It is limited to DICOM objects.** AI results in other formats, such as a FHIR resource or a proprietary JSON, fall outside it.
+- **It narrows its own boundaries further.** The Report Creator and the Evidence Creator (the AI that produces the results) are listed as out of scope.
+- **It runs into a base-standard limitation.** Closed Issue #7 notes that a DICOM SR can currently only be verified by a *human* observer. IHE cannot change that itself; it has to wait for DICOM to add a device as a Verifying Observer.
+
+That last point captures IHE's role well: it orchestrates existing standards and pushes requirements back to the standards bodies when a gap appears.

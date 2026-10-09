@@ -15,6 +15,10 @@ book:
           href: "contents/DICOM/dicom-sr.qmd"
         - text: DICOM KOS
           href: "contents/DICOM/dicom-kos.qmd"
+    - part: IHE
+      chapters: 
+        - text: IHE Overview
+          href: "contents/IHE/ihe-overview.qmd"
 
 format:
   html:

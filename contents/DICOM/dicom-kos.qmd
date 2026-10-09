@@ -1,5 +1,5 @@
 ---
-title: "DICOM KOS"
+title: "DICOM KOS (Key Object Selection Document)"
 ---
 
 A **KOS** is a **DICOM Key Object Selection Document**. It is a small DICOM object that holds **no images or measurements**. It contains only a **list of references to other DICOM instances plus a coded title** that says why they were selected.
