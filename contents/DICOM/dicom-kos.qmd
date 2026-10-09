@@ -1,0 +1,74 @@
+---
+title: "DICOM KOS"
+---
+
+A **KOS** is a **DICOM Key Object Selection Document**. It is a small DICOM object that holds **no images or measurements**. It contains only a **list of references to other DICOM instances plus a coded title** that says why they were selected.
+
+A useful way to picture it is a labeled bookmark, or a sticky note on a folder: *"These items → for this reason."*
+
+### What's inside
+
+```
+KOS instance  (Modality = KO, its own Series, its own SOP Instance UID)
+SOP Class: Key Object Selection Document Storage (1.2.840.10008.5.1.4.1.1.88.59)
+│
+├── Document Title  (CONTAINER, coded) ──► WHY: the meaning of the selection
+│     e.g. (113001, DCM, "Rejected for Quality Reasons")
+│
+├── Document Title Modifier (optional) ──► refines the why
+│     e.g. (AIRA_26, 99IHE, "Assessment Process Outcome")
+│
+├── Key Object Description (optional free text)
+│
+├── Referenced objects ──────────────────► WHAT: pointers only
+│     ├── Study UID / Series UID / SOP Class UID / SOP Instance UID ...1.1
+│     └── ... (can point to many instances, even across series)
+│
+└── Current Requested Procedure Evidence Sequence
+      └── hierarchical Study → Series → Instance index of everything referenced
+```
+
+Technically a KOS is a restricted form of DICOM Structured Report, built on template TID 2010. Because it is SR-based, its "meaning" is carried by a **coded concept** rather than free text, which lets a machine act on it automatically.
+
+### Same container, different meanings
+
+The power of a KOS comes from the Document Title. The same object structure triggers completely different behavior depending on that code:
+
+| Document Title | Typical use |
+|---|---|
+| (113000, DCM, "Of Interest") | The original use: a radiologist flags key images for referrers or teaching |
+| (113001, DCM, "Rejected for Quality Reasons") | Bad acquisition, wrong processing; **AIRA uses this one** |
+| (113037, DCM, "Rejected for Patient Safety Reasons") | e.g., images labeled with the wrong laterality |
+| (113038, DCM, "Incorrect Modality Worklist Entry") | Images attached to the wrong patient or order |
+| (113039, DCM, "Data Retention Policy Expired") | Lifecycle deletion |
+| (113030, DCM, "Manifest") | Used in XDS-I to list the images in a shared imaging study |
+
+The rejection titles come from the IHE **IOCM** (Imaging Object Change Management) profile. Transaction **Rejection Note Stored [RAD-66]** is simply "store a KOS that carries a rejection title."
+
+### Why AIRA uses it for rejection
+
+```
+Quality Note Creator                     Image Manager / Archive
+        │                                         │
+        │  RAD-66: store KOS                      │
+        │  title    = 113001 Rejected for Quality │
+        │  modifier = AIRA_26 Assessment Outcome  │
+        │  refs     → AI SR v1 (UID ...1.1)       │
+        │────────────────────────────────────────►│
+        │                                         │ reads title → "quality rejection"
+        │                                         │ marks ...1.1 as rejected
+        │                                         │
+Image Display (normal AE) ── query ──► ...1.1 NOT returned  (sequestered)
+QA Reporter (expose AE)   ── query ──► ...1.1 returned       (still on disk)
+```
+
+This design brings several practical benefits:
+
+- **Non-destructive.** The original AI output is hidden from clinical workflow but kept for audit, regulators, and PPV calculation. Deleting it would destroy exactly the evidence that post-market surveillance needs.
+- **Reuses existing behavior.** PACS vendors that already support IOCM know how to handle a 113001 KOS, so AIRA needed no new rejection mechanism. Closed Issue #5 in your document records this decision.
+- **Traceability.** The KOS is itself a stored instance with a creation time and an author, so the reason an object disappeared is permanently recorded.
+- **The modifier distinguishes the context.** AIRA_26 tells a QA system that this rejection came from an AI assessment, not from a technologist rejecting a blurry acquisition. Both share title 113001, so without the modifier they would be indistinguishable.
+
+### One point that often confuses people
+
+KOS appears in AIRA in two different roles. The first is as the **rejection mechanism** described above. The second is as a possible **AI Result Object** type: the glossary lists KOS alongside SR, SEG, and SC, because an AI could output a KOS that flags, for example, "the 5 slices most suspicious for PE." In that second case, the AI's KOS can itself be assessed and later rejected by another KOS.
